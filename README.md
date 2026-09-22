@@ -8,19 +8,27 @@ worker 线程沙箱里进行）。
 > 写盘、rollback 回滚）+ 安装前 gate。TypeScript + ESM。
 > 前身 `dsh-plugin-guardian`（原定位：纯检查守卫）已并入本仓库并重构。
 
-## 定位（一句话）
+## 定位
 
-DSH 对"插件装不上/激活失败"已经是 fail-loud（启动即点名报错并退出）；dsh-market 已覆盖
-"组合层静态分析+热开关"；dsh-doctor 已覆盖"环境诊断+可逆修复"；upstream-radar 做"外部
-跨版本验证"。**scavenger 补的是中间那块空白：插件契约级预检（inject / Config schema /
-导出形态 / `!!js` / engines / peers）+ 把导致报错的插件行禁用掉（`--apply`），全程
-不手改文件、可一键回滚。**
+一个独立的 DSH 插件静态分析 CLI：扫描 profile 的**组合 / 解析 / 契约**三层，找出
+**会导致 DSH 启动报错的插件行**（缺包、坏 specifier、非 Cordis 插件形态、Config
+schema 不合法、inject 服务无提供者等），并安全地清理它们（`--apply` 追加
+`disabled: true` 禁用行，自动备份、可回滚），另提供安装前门禁 `gate`。
+
+实现上**不启动 DSH、不导入插件代码**：契约检视在隔离的 worker 线程沙箱中只读插件
+声明（默认导出 / `.inject` / `.Config`，从不调用 `apply()`）；组合层语义精确镜像
+DSH boot 的 `applyEntryPatches`。
 
 ## 安装与使用
 
 ```bash
-pnpm install        # 依赖 schemastery / commander / js-yaml，Node >= 20
-npm run build       # tsdown → lib/（esm + d.ts）
+npm install -g @gausszhou/dsh-scavenger   # 全局安装 CLI（Node >= 20）
+```
+
+本地开发构建：
+
+```bash
+pnpm install && npm run build             # tsdown → lib/（esm + d.ts）
 ```
 
 ```bash
