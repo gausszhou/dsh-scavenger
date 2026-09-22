@@ -146,7 +146,49 @@ live-patch 失败、动态加载失败）。两者配合：先 gate，后 watch�
 - M4 E 层修复建议（dry-run + 写保护）+ （可选）web 面板
 - M5 端到端验收（坏 profile 全链） + 发布 npm + （可选）进 awesome-dsh-plugin 目录
 
-## 6. 待用户确认
+## 6. 实现态语义（v0.1.0，与第 3 节设计项对应的落地形态）
+
+### 6.1 清理安全模型
+
+- **dry-run 默认**：不带 `--apply` 时只读不写，输出"将禁用哪些行 + 原因 + 写目标"。
+- **只禁行，不动插件**：对每个"会阻断启动的启用行"追加 `- id: <row>\n  disabled: true`
+  到 profile 的 `cordis.patch.yml`（profile 层 patch 可覆盖任何更早的 bundle 层行；
+  该文件不存在则创建）。
+- **写前双门禁**：合并后的文档用 DSH 同款 YAML 方言重新 parse 必须成功；每个计划行
+  必须能在最终文档中找到对应的 `disabled: true` 行——**never made worse**。
+- **自动备份**：每次 `--apply` 把原文件快照到
+  `<profileDir>/.dsh-scavenger/backups/<时间戳>/` 并记录 `state.json`；
+  `rollback` 逐字节恢复并移除该备份。
+- **不碰 root `cordis.yml`**（DSH 每 boot 重写为 `[]`），也不改插件包文件。
+
+### 6.2 检查项错误码清单
+
+| 层 | 代码 | 严重度 | 对应 DSH 启动行为 |
+|---|---|---|---|
+| A 组合 | `BUNDLE_LAYER_ERROR` / `PATCH_PARSE_ERROR` | error | patch 文件坏 → 层被跳过，行丢失 |
+| A 组合 | `DUPLICATE_ENTRY_ID` | error | 同 id 多行：后写覆盖且 boot 审计点名 |
+| A 组合 | `DUPLICATE_PLUGIN_NAME` | warning | 跨层同名 → 后者运行时遮蔽前者 |
+| A 组合 | `ORPHAN_PATCH_ROW` | warning | 目标不存在 → warn+skip |
+| A 组合 | `LAYER_OVERRIDE` | info | 合法但需知情的覆盖（同 id 行替换） |
+| B 解析 | `ROW_PACKAGE_MISSING` | error | `Cannot find package '<pkg>' imported from <profileDir>/` |
+| B 解析 | `ROW_FILE_MISSING` | warning | 相对/绝对路径行指向不存在的文件 |
+| B 解析 | `ROW_INVALID_SPECIFIER` / `ROW_MISSING_NAME` | error | Loader 无法导入 → 启动失败 |
+| B 解析 | `CORE_AS_DEPENDENCY` | error | 插件把 `@deepseek-ai/dsh*` 装成普通依赖 → 遮蔽宿主版本 |
+| B 解析 | `MULTI_VERSION_CORE` | error | lockfile 里多个核心版本 → pnpm 提升歧义 |
+| B 解析 | `PEER_RANGE_MISMATCH` | warning | peer 区间与解析到的实际版本不符 |
+| C 契约 | `CONTRACT_IMPORT_FAILED` | warning | `Cannot find package 'X' imported from <module>` |
+| C 契约 | `CONTRACT_PLUGIN_SHAPE` | error | 默认导出不是 Cordis 插件 → 激活即挂 |
+| C 契约 | `CONTRACT_CONFIG_INVALID` | error | 行配置未过声明的 Standard Schema → ValidationError |
+| C 契约 | `CONTRACT_INJECT_UNVERIFIED` | warning | inject 服务无已知提供者 → PENDING 永久挂起 |
+| C 契约 | `CONTRACT_CONFIG_DYNAMIC` | info | 配置含 `!!js` 表达式（`ctx.service` 等）→ 校验留给运行期 |
+| Gate | `GATE_ENGINES_DSH` / `GATE_BUNDLE_PATCH_MISSING` 等 | error | 安装前即可拒绝的硬不兼容 |
+
+**可清理（会被 `--apply` 禁用的）error 码**：`ROW_PACKAGE_MISSING`、`ROW_FILE_MISSING`、
+`ROW_INVALID_SPECIFIER`、`CONTRACT_PLUGIN_SHAPE`、`CONTRACT_IMPORT_FAILED`、
+`CONTRACT_CONFIG_INVALID`。warning/info 与运行期错误（apply 抛错）**不自动清理**——
+运行期归因属 D 层（后续规划）。
+
+## 7. 待用户确认
 
 1. **范围**：只要 CLI 预检（A/B/C），还是也要运行时 observer（D）？建议至少 CLI+observer；
    面板做不做？
