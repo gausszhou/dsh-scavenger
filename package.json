@@ -1,0 +1,45 @@
+{
+  "name": "@gausszhou/dsh-scavenger",
+  "version": "0.1.0",
+  "description": "Scavenge a DeepSeek Harness profile: pre-flight static checks (composition, resolution, contract) that identify which plugins cause boot errors, and clean them up (plan → apply, backup/rollback included).",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "dsh-scavenger": "./lib/cli.js"
+  },
+  "files": [
+    "lib"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.2",
+    "commander": "^13.1.0",
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^24.0.0",
+    "tsdown": "^0.9.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0"
+  }
+}

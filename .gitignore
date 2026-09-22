@@ -141,3 +141,13 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# build output
+lib/
+dist/
+
+# deps
+node_modules/
+
+# research notes kept out of the repo
+.research/
