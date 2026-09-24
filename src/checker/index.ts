@@ -154,7 +154,7 @@ export function analyzeProfile(profileDir: string, options: CheckOptions = {}): 
       dshInstallDir: dshInstall, scannedAt: new Date().toISOString(), ok: false,
       summary: { errors: 1, warnings: 0, infos: 0 },
       findings: [{ code: 'PROFILE_MANIFEST_UNREADABLE', severity: 'error', message: 'profile package.json is missing or unreadable — the profile cannot boot' }],
-      rows: [], bundles: [],
+      rows: [], resolvableRows: [], bundles: [],
     }
   }
   const bundleNames = Array.isArray(manifest.dsh?.profile?.bundles)
@@ -343,6 +343,7 @@ export function analyzeProfile(profileDir: string, options: CheckOptions = {}): 
     summary,
     findings: sorted,
     rows,
+    resolvableRows: composed.resolvableRows,
     bundles,
     ...(options.includeTree === true ? { nodes: composed.nodes } : {}),
   }

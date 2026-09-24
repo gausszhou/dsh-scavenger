@@ -32,6 +32,7 @@ doctor 管"环境/文件/进程层"，scavenger 管"插件契约与运行时行�
 ├── lib/runtime    Cordis 插件（运行期被动观测 + 归因 + 服务/工具面）
 ├── bin/dsh-scavenger  CLI：--profile 清理（plan/--apply/rollback）
 │                       check <profile> [--json|--text]
+│                       purge [--apply]            # 清理所有三方插件
 │                       gate  <pkg-or-uri>            # 安装前门禁（供脚本/market/doctor 调用）
 └── client/        （可选）web 面板：插件健康度/错误时间线
 ```
@@ -187,6 +188,24 @@ live-patch 失败、动态加载失败）。两者配合：先 gate，后 watch�
 `ROW_INVALID_SPECIFIER`、`CONTRACT_PLUGIN_SHAPE`、`CONTRACT_IMPORT_FAILED`、
 `CONTRACT_CONFIG_INVALID`。warning/info 与运行期错误（apply 抛错）**不自动清理**——
 运行期归因属 D 层（后续规划）。
+
+### 6.3 purge：清理所有三方插件（与 6.1 共用同一安全模型）
+
+`purge` 子命令是主命令的"批量版"：**凡是 Loader 会尝试导入的三方插件行
+（`resolvableRows`），不管它当前是否报错，一律计划禁用**，用于"清空非官方插件、
+回到 DSH 原生 profile"的场景。与主命令的差异只在**选行标准**：
+
+- 主命令：只选带 CLEANABLE_CODES error 发现的行（坏了才禁）。
+- `purge`：选所有**三方行**——裸包 specifier 且包根不在 `corePackageNames`
+  （`@deepseek-ai/dsh*`、`@deepseek-ai/cordis*`、in-box bundles）集合中。
+  `cordis:` 内建、相对/绝对路径/`file:` 本地文件、group 行、以及字面量 `disabled: true`
+  的行（已不在 `resolvableRows`）都不算三方，不会被计划；`!!js` disabled（conditional）
+  的行运行期可能加载，照常禁用。
+
+计划生成复用 `planCleanup` 的步骤结构（`CleanupStep`），合成错误码 `PURGE_THIRD_PARTY`
+（仅作计划标注，不是发现码，不进 `CLEANABLE_CODES`）；写盘 / 双门禁 / 备份 / 回滚 /
+`--json` / 退出码语义与主命令完全一致。purge **不跑契约检视**（C 层与选行无关，
+且批量场景要快），计划只由静态组合层（`resolvableRows`）+ `corePackageNames` 决定。
 
 ## 7. 待用户确认
 

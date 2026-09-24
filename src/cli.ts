@@ -5,6 +5,7 @@
  *   dsh-scavenger --profile <name> [--apply] [--json] [--home <dir>] [--no-inspect]
  *   dsh-scavenger check    --profile <name> [--json] [--home <dir>] [--no-inspect]
  *   dsh-scavenger gate     <candidate> [--host-profile <name>] [--json] [--no-inspect]
+ *   dsh-scavenger purge    --profile <name> [--apply] [--json] [--home <dir>]
  *   dsh-scavenger rollback [backupId] --profile <name> [--json]
  *   dsh-scavenger backups  --profile <name> [--json]
  *
@@ -12,6 +13,11 @@
  * that would make `dsh <profile>` fail to boot, and — with `--apply` —
  * disables those rows in the profile's cordis.patch.yml (auto-backup, see
  * `rollback`). Without `--apply` nothing is ever written: dry-run plan only.
+ *
+ * `purge` is the wholesale variant: it plans the disable of EVERY third-party
+ * plugin row (bare-package rows whose package is not a DSH core package),
+ * broken or not, keeping local files, `cordis:` builtins and core packages.
+ * Same safety model: plan-only by default, `--apply` writes with auto-backup.
  *
  * Exit codes: 0 = clean (or cleaned); 1 = culprit rows found (plan shown) or
  * residual errors after cleaning; 2 = usage/IO failure.
@@ -24,11 +30,11 @@
  */
 import { Command } from 'commander'
 import { join } from 'node:path'
-import { analyzeProfile, VERSION } from './checker/index.ts'
+import { analyzeProfile, corePackageNames, VERSION } from './checker/index.ts'
+import { resolveDshHome, resolveProfileDir } from './checker/resolve.ts'
 import { contractFindings } from './inspector/check.ts'
 import { gateCandidate } from './gate.ts'
-import { applyCleanup, listBackups, planCleanup, rollbackCleanup } from './cleaner.ts'
-import { resolveDshHome, resolveProfileDir } from './checker/resolve.ts'
+import { applyCleanup, listBackups, planCleanup, planPurgeCleanup, rollbackCleanup } from './cleaner.ts'
 import type { CheckReport, Finding } from './types.ts'
 
 function severitySymbol(severity: Finding['severity']): string {
@@ -139,11 +145,47 @@ function printMain(report: CheckReport, plan: ReturnType<typeof planCleanup>, ap
   }
 }
 
+// ── purge output ─────────────────────────────────────────────────────────
+function printPurge(report: CheckReport, plan: ReturnType<typeof planPurgeCleanup>, apply: ReturnType<typeof applyCleanup> | null, home: string, profile: string): void {
+  process.stdout.write(`\n=== dsh-scavenger purge: ${profile} ===\n`)
+  process.stdout.write(`profile dir : ${report.profileDir}\n`)
+  process.stdout.write(`dsh install : ${report.dshInstallDir ?? '(not located)'}\n`)
+  process.stdout.write(`home        : ${home}\n`)
+  process.stdout.write(`scanned at  : ${report.scannedAt}\n\n`)
+  process.stdout.write(`summary: ${report.summary.errors} error / ${report.summary.warnings} warning / ${report.summary.infos} info\n\n`)
+
+  if (plan.steps.length === 0) {
+    process.stdout.write('✓ No third-party plugin rows found — nothing to purge.\n')
+    return
+  }
+
+  process.stdout.write(`— purge plan (${plan.steps.length} third-party plugin row${plan.steps.length === 1 ? '' : 's'}) —\n`)
+  for (const step of plan.steps) {
+    process.stdout.write(`  ✗ disable ${step.id}${step.name !== undefined ? ` (${step.name})` : ''}  [${step.codes.join(', ')}]\n`)
+    for (const reason of step.reasons.slice(0, 2)) process.stdout.write(`      ↳ ${reason.split('\n')[0] ?? reason}\n`)
+  }
+  process.stdout.write(`  target: ${plan.writeTarget}${plan.targetMissing ? ' (will be created)' : ''}\n`)
+
+  if (apply === null) {
+    process.stdout.write(`\n→ ${plan.steps.length} third-party row(s) found. Re-run with --apply to disable them all (auto-backup; \`dsh-scavenger rollback\` restores).\n`)
+  } else if (apply.applied === true) {
+    process.stdout.write(`\n✓ Applied: disabled ${plan.steps.length} row(s) in ${plan.writeTarget}\n`)
+    if (apply.backupDir !== null) process.stdout.write(`  backup: ${apply.backupDir}  (\`dsh-scavenger rollback\` restores)\n`)
+    if (report.summary.errors > 0) {
+      process.stdout.write(`  remaining ${report.summary.errors} error(s) are not cleanable by disabling rows.\n`)
+    } else {
+      process.stdout.write('  re-check after cleaning: no residual errors. Restart `dsh <profile>` to boot without third-party plugins.\n')
+    }
+  } else {
+    process.stdout.write(`\n→ apply refused: ${apply.reason ?? 'unknown'} — nothing written.\n`)
+  }
+}
+
 // ── subcommands ──────────────────────────────────────────────────────────
 function buildSub(program: Command): void {
   program
     .name('dsh-scavenger')
-    .description('Scavenge a DeepSeek Harness profile (subcommands: check | gate | rollback | backups).')
+    .description('Scavenge a DeepSeek Harness profile (subcommands: check | gate | purge | rollback | backups).')
     .version(VERSION)
 
   program
@@ -205,6 +247,45 @@ function buildSub(program: Command): void {
     })
 
   program
+    .command('purge')
+    .description('Wholesale cleanup: plan (or with --apply write) the disable of EVERY third-party plugin row — broken or not.')
+    .option('--profile <name>', 'profile name under $DSH_HOME/profiles (default: web)', 'web')
+    .option('--apply', 'write the purge plan: disable all third-party rows in the profile patch (default: dry-run plan only)')
+    .option('--json', 'emit a machine-readable report (check report + plan + apply result)')
+    .option('--home <dir>', 'override the Harness home (default: $DSH_HOME or ~/.dsh)')
+    .option('--dsh-install <dir>', 'override the dsh installation directory')
+    .action(async (opts: { profile?: string; apply?: boolean; json?: boolean; home?: string; dshInstall?: string }) => {
+      const home = resolveDshHome(opts.home)
+      const profile = opts.profile ?? 'web'
+      const { report, dir } = await loadReport(profile, home, opts.dshInstall, false)
+      // 三方判定需要 core 包集合：dsh install 提供官方包清单。
+      const core = corePackageNames(report.dshInstallDir)
+      const plan = planPurgeCleanup(report, core)
+      const apply = opts.apply === true && plan.needsCleanup ? applyCleanup(dir, plan.steps, plan.writeTarget) : null
+      if (apply?.applied === true) {
+        // Re-check after cleaning: any residual error is not cleanable by disabling a row.
+        const recheck = await loadReport(profile, home, opts.dshInstall, false)
+        report.summary = recheck.report.summary
+        report.ok = recheck.report.ok
+        report.findings = recheck.report.findings
+        report.rows = recheck.report.rows
+        report.resolvableRows = recheck.report.resolvableRows
+        plan.needsCleanup = planPurgeCleanup(recheck.report, core).needsCleanup
+      }
+
+      if (opts.json === true) {
+        process.stdout.write(`${JSON.stringify({ report, plan, apply }, null, 2)}\n`)
+      } else {
+        printPurge(report, plan, apply, home, profile)
+      }
+      if (apply?.applied === true) {
+        process.exitCode = report.ok ? 0 : 1
+      } else {
+        process.exitCode = plan.needsCleanup ? 1 : 0
+      }
+    })
+
+  program
     .command('rollback')
     .description('Restore the profile patch file from a scavenger backup (default: the newest).')
     .argument('[backupId]', 'backup directory name; omit for the newest backup')
@@ -248,7 +329,7 @@ function buildSub(program: Command): void {
 }
 
 // ── route ────────────────────────────────────────────────────────────────
-const SUBCOMMANDS = new Set(['check', 'gate', 'rollback', 'backups'])
+const SUBCOMMANDS = new Set(['check', 'gate', 'purge', 'rollback', 'backups'])
 const argv = process.argv.slice(2)
 const firstToken = argv.find((arg) => !arg.startsWith('-'))
 const isSubcommand = firstToken !== undefined && SUBCOMMANDS.has(firstToken)

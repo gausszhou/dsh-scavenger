@@ -43,6 +43,10 @@ dsh-scavenger rollback [backupId] --profile web
 dsh-scavenger backups --profile web
 dsh-scavenger check --profile web [--json]
 dsh-scavenger gate ./my-plugin-bundle [--host-profile web] [--json]
+
+# 清理所有三方插件（区别于主命令：不看是否报错，凡非官方裸包插件行一律禁用）
+dsh-scavenger purge --profile web              # dry-run 计划
+dsh-scavenger purge --profile web --apply      # 写盘（自动备份，可 rollback）
 ```
 
 **退出码**：主命令与 check 均为 `0` = 干净（或已清理干净）；`1` = 存在会阻断启动的

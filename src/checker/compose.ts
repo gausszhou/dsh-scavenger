@@ -99,7 +99,7 @@ export interface Composed {
    * `disabled: true` (own or inherited from a group parent) drops the row;
    * `!!js` disabled expressions stay `conditional` (indeterminate here).
    */
-  resolvableRows: Array<{ id: string; layer: string; name?: string; activation: 'required' | 'conditional' }>
+  resolvableRows: Array<{ id: string; layer: string; name?: string; group?: boolean; activation: 'required' | 'conditional' }>
   /** Final composed tree with layer tags (config preserved for contract checks). */
   nodes: EntryNode[]
 }
@@ -309,6 +309,7 @@ export function composeLayers(layers: LayerInput[]): Composed {
           id: node.id,
           layer,
           name: node.name,
+          group: node.group === true,
           activation: activation === 'conditional' ? 'conditional' : 'required',
         })
       }

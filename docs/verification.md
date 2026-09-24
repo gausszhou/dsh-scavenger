@@ -43,13 +43,34 @@ summary: 0 error / 0 warning / 36 info
 提供者注册模式（`ctx.provide('x')` / `super(ctx, 'x')` / `const X = "x"; provide(X)`）
 自动推导，零手工维护。
 
+### 2.1 purge 实测（混合 profile：三方裸包 ×2 + core + cordis: + 本地文件）
+
+```text
+$ dsh-scavenger purge --profile web --home /tmp/gdn-home
+summary: 3 error / 0 warning / 0 info
+— purge plan (2 third-party plugin rows) —
+  ✗ disable chatluna (chatluna)  [PURGE_THIRD_PARTY]
+  ✗ disable gdn-kit (@gausszhou/dsh-kit)  [PURGE_THIRD_PARTY]
+→ 2 third-party row(s) found. Re-run with --apply to disable them all ...
+
+$ dsh-scavenger purge --profile web --home /tmp/gdn-home --apply
+✓ Applied: disabled 2 row(s) in .../cordis.patch.yml
+  backup: .../.dsh-scavenger/backups/...   # rollback 可逐字节还原
+
+$ dsh-scavenger rollback --profile web --home /tmp/gdn-home
+✓ restored .../cordis.patch.yml from ...
+```
+
+`@deepseek-ai/cordis-plugin-group`（core）、`cordis:timer`（内建）、`./plugins/local.js`
+（本地文件）均被保留；只有 bare 三方裸包行被禁用。
+
 ## 3. 单元测试
 
-41 项单测覆盖：组合层（compose）、解析层（resolve）、semver-peer（peers）、检查编排
-（checker）与清理全链（cleaner：plan → apply → 复检 → rollback，含 4 形态坏夹具的
-归属断言）。
+45 项单测覆盖：组合层（compose）、解析层（resolve）、semver-peer（peers）、检查编排
+（checker）、清理全链（cleaner：plan → apply → 复检 → rollback，含 4 形态坏夹具的
+归属断言）与 purge 三方判定/计划/回滚（purge）。
 
 ```bash
-npm test            # node --test（41 项单测）
+npm test            # node --test（45 项单测）
 npm run typecheck   # tsc --noEmit
 ```

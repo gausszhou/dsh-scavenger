@@ -13,7 +13,7 @@
 | `src/inspector/index.ts` | worker 线程沙箱检视单个插件模块（只读声明：默认导出 / `.inject` / `.Config`，从不调用 `apply()`） |
 | `src/inspector/check.ts` | 契约检查编排：`contractFindings` / `classifyInject` / `KNOWN_SERVICES` |
 | `src/inspector/services.ts` | 服务目录推导：运行时扫描 `ctx.provide('x')` / `super(ctx, 'x')` 等提供者注册模式 |
-| `src/cleaner.ts` | 清理计划 `planCleanup` / 应用 `applyCleanup`（备份 + 双门禁 + 写盘）/ `rollbackCleanup` / `listBackups` |
+| `src/cleaner.ts` | 清理计划 `planCleanup` / 清理全部三方插件 `planPurgeCleanup` / 应用 `applyCleanup`（备份 + 双门禁 + 写盘）/ `rollbackCleanup` / `listBackups` |
 | `src/gate.ts` | 安装前门禁 `gateCandidate`（engines / bundle patch 缺失等硬不兼容） |
 | `src/cli.ts` | 双 Command CLI（主命令与子命令独立实例，避免 commander 父子选项串味） |
 | `src/types.ts` | 报告类型（`CheckReport` / `Finding` / `Severity` / `LoaderRow` 等） |
@@ -28,8 +28,9 @@
 | `test/peers.test.ts` | semver-peer 匹配 |
 | `test/checker.test.ts` | 检查编排（含 4 形态坏夹具的归属断言） |
 | `test/cleaner.test.ts` | 清理全链：plan → apply → 复检 → rollback |
+| `test/purge.test.ts` | purge 三方判定 `isThirdPartyRow` / 计划 `planPurgeCleanup` / apply → 复检 → rollback |
 
-共 41 项单测，见 `docs/verification.md`。
+共 45 项单测，见 `docs/verification.md`。
 
 ## 文档（`docs/`）
 
