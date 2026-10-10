@@ -9,7 +9,7 @@
  * semver/peer matching primitives they share.
  */
 
-export { analyzeProfile, checkProfile, corePackageNames, VERSION } from './checker/index.ts'
+export { analyzeProfile, checkProfile, corePackageNames, REQUIRED_STARTUP_ENTRY_IDS, VERSION } from './checker/index.ts'
 export type { CheckOptions } from './checker/index.ts'
 export { satisfiesRange, compareSemver } from './checker/peers.ts'
 export { composeLayers, parsePatchFile, parsePatchText, isJsExpr } from './checker/compose.ts'

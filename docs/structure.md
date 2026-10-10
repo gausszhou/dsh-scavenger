@@ -30,7 +30,7 @@
 | `test/cleaner.test.ts` | 清理全链：plan → apply → 复检 → rollback |
 | `test/purge.test.ts` | purge 三方判定 `isThirdPartyRow` / 计划 `planPurgeCleanup` / apply → 复检 → rollback |
 
-共 45 项单测，见 `docs/verification.md`。
+共 49 项单测，见 `docs/verification.md`。
 
 ## 文档（`docs/`）
 

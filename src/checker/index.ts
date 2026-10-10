@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path'
 import { composeLayers, parsePatchFile } from './compose.ts'
 import type { LayerInput } from './compose.ts'
 import {
-  INBOX_BUNDLES, buildBundleLayers, findDshInstallDir, findInstalledPackage,
+  INBOX_BUNDLES, buildBundleLayers, findDshInstallDir,
   isBareLoaderSpecifier, packageRoot, readProfileManifest, resolveDshHome,
   resolveProfileDir, resolveRowName,
 } from './resolve.ts'
@@ -30,6 +30,35 @@ export interface CheckOptions {
 }
 
 export const VERSION = '0.1.0'
+
+/**
+ * DSH 全局必需启动条目（dsh-app-boot `auditStartupEntries` 的硬编码集合，
+ * 0.1.6+ 起 required-entry 启动策略）：只有这些 id（以及根 Include，scavenger
+ * 的离线分析接触不到）激活失败才让启动失败；其余插件失败只产生启动警告，
+ * 成功插件继续运行。行级检查/契约检查据此决定 error 还是 warning。
+ */
+export const REQUIRED_STARTUP_ENTRY_IDS: ReadonlySet<string> = new Set([
+  'agent-loop',
+  'webserver',
+  'modules',
+  'connection',
+  'headless-runner',
+  'acp',
+  'sdk-jsonrpc-server',
+])
+
+/** 行级失败严重度（0.2 启动策略）。 */
+function rowFailureSeverity(row: { id: string; activation: 'required' | 'conditional' }): 'error' | 'warning' {
+  if (row.activation === 'required' && REQUIRED_STARTUP_ENTRY_IDS.has(row.id)) return 'error'
+  return 'warning'
+}
+
+/** 行级失败消息后缀，区分"阻断启动"与"仅启动警告"。 */
+function rowFailureTail(row: { id: string; activation: 'required' | 'conditional' }): string {
+  return rowFailureSeverity(row) === 'error'
+    ? ' — a required entry: the profile will fail to boot'
+    : ' — boot continues; DSH logs this entry as failed at startup'
+}
 
 /** DSH host core packages: `@deepseek-ai/{dsh,cordis}*` plus a curated seed. */
 export function corePackageNames(dshInstallDir: string | null): Set<string> {
@@ -220,16 +249,16 @@ export function analyzeProfile(profileDir: string, options: CheckOptions = {}): 
       const message = `${row.layer}: loader entry ${JSON.stringify(row.id)} has no module name`
       push({
         code: 'ROW_MISSING_NAME',
-        severity: row.activation === 'required' ? 'error' : 'warning',
+        severity: rowFailureSeverity(row),
         layer: row.layer, entryId: row.id,
-        message: row.activation === 'required' ? `${message} — the profile will fail to boot` : `${message} — boot will fail if its disabled expression enables the entry`,
+        message: `${message}${rowFailureTail(row)}`,
       })
       continue
     }
     if (!isBareLoaderSpecifier(row.name)) {
       // Relative / absolute / file: / subpath rows — check file existence.
       if (!row.name.startsWith('cordis:')) {
-        const resolution = resolveRowName(row.name, profileDir)
+        const resolution = resolveRowName(row.name, profileDir, dshInstall)
         if (resolution.kind === 'file' && resolution.resolved === undefined) {
           push({
             code: 'ROW_FILE_MISSING', severity: 'warning', layer: row.layer, entryId: row.id, plugin: row.name,
@@ -243,24 +272,25 @@ export function analyzeProfile(profileDir: string, options: CheckOptions = {}): 
     if (pkg === null) {
       const message = `${row.layer}: loader specifier ${JSON.stringify(row.name)} is not a valid bare package name`
       push({
-        code: 'ROW_INVALID_SPECIFIER', severity: row.activation === 'required' ? 'error' : 'warning',
+        code: 'ROW_INVALID_SPECIFIER', severity: rowFailureSeverity(row),
         layer: row.layer, entryId: row.id, plugin: row.name,
-        message: row.activation === 'required' ? `${message} — the profile will fail to boot` : `${message} — boot will fail if its disabled expression enables the entry`,
+        message: `${message}${rowFailureTail(row)}`,
       })
       continue
     }
-    const hit = findInstalledPackage(profileDir, pkg) ?? findInstalledPackage(dirname(profileDir), pkg)
-    if (hit === null) {
-      const message = `${row.layer}: loader package ${pkg} is not installed in the profile`
+    // 0.1.6+ 运行时解析：包可能在 profile（含 workspace 根）也可能在 dsh 安装。
+    const resolution = resolveRowName(row.name, profileDir, dshInstall)
+    if (resolution.kind === 'package' && resolution.resolved === undefined) {
+      const message = `${row.layer}: loader package ${pkg} is not installed in the profile or the dsh installation`
       push({
-        code: 'ROW_PACKAGE_MISSING', severity: row.activation === 'required' ? 'error' : 'warning',
+        code: 'ROW_PACKAGE_MISSING', severity: rowFailureSeverity(row),
         layer: row.layer, entryId: row.id, plugin: row.name,
-        message: row.activation === 'required' ? `${message} — the profile will fail to boot` : `${message} — boot will fail if its disabled expression enables the entry`,
+        message: `${message}${rowFailureTail(row)}`,
       })
-    } else if (userLayerLabels.has(row.layer)) {
+    } else if (resolution.kind === 'package' && userLayerLabels.has(row.layer)) {
       push({
         code: 'ROW_PACKAGE_RESOLVED', severity: 'info', layer: row.layer, entryId: row.id, plugin: row.name,
-        message: `${row.layer}: loader package ${pkg} resolves at ${hit}`,
+        message: `${row.layer}: loader package ${pkg} resolves at ${resolution.resolved}`,
       })
     }
   }

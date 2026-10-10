@@ -45,22 +45,31 @@ before(() => {
       name: './plugins/missing-inject.js'
     - id: gdn-nonexistent
       name: 'gdn-package-does-not-exist-xyz'
+    - id: webserver
+      name: 'gdn-required-does-not-exist'
 `)
 })
 
 after(() => rmSync(home, { recursive: true, force: true }))
 
 describe('analyzeProfile on the broken fixture', () => {
-  it('flags the missing row package as the blocking error', () => {
+  it('flags required-entry missing packages as errors, ordinary ones as warnings', () => {
     const report = analyzeProfile(profileDir, { homeDir: home, includeTree: true })
     assert.equal(report.ok, false)
     const missing = report.findings.filter((f) => f.code === 'ROW_PACKAGE_MISSING')
-    assert.equal(missing.length, 1)
-    assert.equal(missing[0]?.severity, 'error')
-    assert.equal(missing[0]?.plugin, 'gdn-package-does-not-exist-xyz')
+    assert.equal(missing.length, 2)
+    // DSH 全局必需条目（0.1.6+ required-entry 策略）缺包 → error（阻断启动）。
+    const required = missing.find((f) => f.entryId === 'webserver')
+    assert.equal(required?.severity, 'error')
+    assert.equal(required?.plugin, 'gdn-required-does-not-exist')
+    assert.match(required?.message ?? '', /required entry/)
+    // 普通三方行缺包 → warning（启动继续，仅启动诊断）。
+    const nonRequired = missing.find((f) => f.entryId === 'gdn-nonexistent')
+    assert.equal(nonRequired?.severity, 'warning')
+    assert.match(nonRequired?.message ?? '', /boot continues/)
     // The three real ./plugins rows resolve fine — no ROW_FILE_MISSING.
     assert.equal(report.findings.filter((f) => f.code === 'ROW_FILE_MISSING').length, 0)
-    assert.equal(report.rows.length, 4)
+    assert.equal(report.rows.length, 5)
     assert.deepEqual(report.bundles, [])
   })
 

@@ -53,8 +53,10 @@ export interface BundleInfo {
   source?: string
   /** Resolved package directory; null when not installed. */
   directory: string | null
-  /** Absolute patch file path; null when undeclared or missing. */
+  /** Absolute patch file path (first declared file); null when undeclared or missing. */
   patchPath: string | null
+  /** All declared patch files in order (0.1.7+ allows ordered patch lists). */
+  patchPaths?: string[]
   /** Why this layer cannot load at boot (null = ok). */
   error: string | null
   /** Loader entry ids this bundle's patch inserts (top level). */

@@ -14,6 +14,7 @@ import { classifyInject, inspectModule } from './index.ts'
 import { KNOWN_SERVICES } from './index.ts'
 import { discoverServiceNames } from './services.ts'
 import { resolveFileSpecifier } from '../checker/resolve.ts'
+import { REQUIRED_STARTUP_ENTRY_IDS } from '../checker/index.ts'
 import type { CheckReport, Finding, LoaderEntryNode } from '../types.ts'
 
 export { classifyInject, KNOWN_SERVICES }
@@ -36,16 +37,25 @@ interface RowContractTarget {
 }
 
 /** Resolve one row's module URL using the profile's own resolution anchor. */
-function resolveRowModule(name: string, profileDir: string): string | null {
+function resolveRowModule(name: string, profileDir: string, dshInstallDir: string | null): string | null {
   if (name.startsWith('cordis:')) return null
   try {
     if (name.startsWith('.') || name.startsWith('/') || name.startsWith('file:')) {
       const path = resolveFileSpecifier(name, profileDir)
       return path === null ? null : pathToFileURL(path).href
     }
-    const require = createRequire(join(profileDir, 'package.json'))
-    const resolved = require.resolve(name)
-    return pathToFileURL(resolved).href
+    // 0.1.6+ 运行时解析：profile 解析不到时回落 dsh 安装目录（宿主）。
+    const anchors = dshInstallDir !== null ? [profileDir, dshInstallDir] : [profileDir]
+    for (const anchor of anchors) {
+      try {
+        const require = createRequire(join(anchor, 'package.json'))
+        const resolved = require.resolve(name)
+        return pathToFileURL(resolved).href
+      } catch {
+        // 尝试下一个解析锚点。
+      }
+    }
+    return null
   } catch {
     return null
   }
@@ -77,6 +87,16 @@ export async function contractFindings(profileDir: string, report: CheckReport, 
   const skipConfig = options.skipConfig ?? false
   const meta = indexTree(report.nodes)
 
+  // 0.2 启动策略下的必需行：激活为 required 且 id 在 DSH 全局必需列表里。
+  // 只有它们的契约失败会阻断启动；其余行降级为启动警告。
+  const requiredRows = new Set(
+    report.resolvableRows.filter((r) => r.activation === 'required' && REQUIRED_STARTUP_ENTRY_IDS.has(r.id)).map((r) => r.id),
+  )
+  const isRequiredRow = (id: string): boolean => requiredRows.has(id)
+  const failureTail = (id: string): string => isRequiredRow(id)
+    ? ' — a required entry: the profile will fail to boot'
+    : ' — boot continues; DSH logs this entry as failed at startup'
+
   // Catalog of services this deployment can provide: builtin names + a
   // runtime-derived scan of installed packages. Rows injected with a service
   // outside this set are "unverified", never asserted broken.
@@ -86,7 +106,7 @@ export async function contractFindings(profileDir: string, report: CheckReport, 
   const targets: RowContractTarget[] = []
   for (const row of report.rows) {
     if (row.name === undefined || row.name === '') continue
-    const moduleUrl = resolveRowModule(row.name, profileDir)
+    const moduleUrl = resolveRowModule(row.name, profileDir, report.dshInstallDir)
     if (moduleUrl === null) continue
     targets.push({
       id: row.id,
@@ -129,10 +149,10 @@ export async function contractFindings(profileDir: string, report: CheckReport, 
     }
     if (!inspected.validPlugin) {
       findings.push({
-        code: 'CONTRACT_PLUGIN_SHAPE', severity: 'error',
+        code: 'CONTRACT_PLUGIN_SHAPE', severity: isRequiredRow(target.id) ? 'error' : 'warning',
         layer: target.layer, entryId: target.id, plugin: target.name,
         detail: { shape: inspected.shape },
-        message: `${target.layer}: entry ${target.id} default export is not a loadable Cordis plugin (shape: ${inspected.shape}) — the profile will fail to boot`,
+        message: `${target.layer}: entry ${target.id} default export is not a loadable Cordis plugin (shape: ${inspected.shape})${failureTail(target.id)}`,
       })
       return
     }
@@ -159,10 +179,10 @@ export async function contractFindings(profileDir: string, report: CheckReport, 
     } else if (inspected.validation !== null && !inspected.validation.ok) {
       const issues = inspected.validation.issues.map((issue) => `${String(issue.path ?? 'config')}: ${issue.message ?? 'invalid'}`).join('; ')
       findings.push({
-        code: 'CONTRACT_CONFIG_INVALID', severity: 'error',
+        code: 'CONTRACT_CONFIG_INVALID', severity: isRequiredRow(target.id) ? 'error' : 'warning',
         layer: target.layer, entryId: target.id, plugin: target.name,
         detail: { issues: inspected.validation.issues },
-        message: `${target.layer}: entry ${target.id} config fails its declared schema — ${issues}`,
+        message: `${target.layer}: entry ${target.id} config fails its declared schema — ${issues}${failureTail(target.id)}`,
       })
     }
   }

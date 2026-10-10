@@ -2,8 +2,11 @@
 
 > 目标：一个独立的 DSH 插件/工具，用于**检查其他插件的兼容性与错误**：启动前预检
 > （pre-flight gate）、运行期错误观测与归因（watchdog & attribution）、以及安全的修复建议。
-> 本方案基于对 DSH 0.1.5-rc.2（本机安装版）的实证调研（见 `docs/research.md`），并
-> 明确与现有方案（dsh-market / dsh-doctor / upstream-radar / 官方诊断）差异化。
+> 本方案基于对 DSH 0.2.0-rc.2（当前 npm latest，本机安装版）的实证调研（见
+> `docs/research.md`），并明确与现有方案（dsh-market / dsh-doctor / upstream-radar /
+> 官方诊断）差异化。兼容基线的两个关键语义：**0.1.6+ 的 required-entry 启动策略**
+> （仅全局必需条目失败才 fatal，其余插件失败只是启动警告）与 **0.1.7+ 的
+> `dsh.bundle.patch` 有序多文件列表**。
 
 ## 1. 生态定位（为什么还有空白）
 
@@ -64,11 +67,13 @@ live-patch 失败、动态加载失败）。两者配合：先 gate，后 watch�
 - A7 排序规则冲突/循环 → warning（复用 market order.ts 语义）
 
 ### B. 解析层（静态，不导入模块；PoC 已验证）
-- B1 行 name 的裸包在 profile 可见 node_modules 祖先中不可解析 → error（实测形态3）
+- B1 行 name 的裸包在 profile 可见 node_modules 祖先或 dsh 安装中不可解析
+  → error（行 id 属 DSH 全局必需集合，0.1.6+ required-entry 语义）/ warning（其余行，
+  启动继续并记录失败）——实测形态3
 - B2 相对/绝对路径行：文件存在性 + 最近 package.json name/version 可读 → error/warning
 - B3 插件把核心包（@deepseek-ai/{dsh,cordis}*）当普通依赖（hoist 遮蔽）→ error
 - B4 lockfile 核心包多版本 → error/warning（复用 market）
-- B5 用户/home patch 行无 name 或 name 非法（含空名）→ error/warning
+- B5 用户/home patch 行无 name 或 name 非法（含空名）→ error/warning（分级同 B1）
 
 ### C. 契约层（vm 沙箱导入插件模块后检视；market/doctor 均无）
 - C1 导出形态：default/具名导出必须是 Cordis 插件形状（function/object/class，
@@ -115,9 +120,14 @@ live-patch 失败、动态加载失败）。两者配合：先 gate，后 watch�
 1. **安全导入插件模块**：`node:vm` + 受限 createRequire（生态先例 dsh-cordis-host-runner
   的沙箱）；只读声明不动 apply；Config 校验只调 `.validate`。风险自评：插件顶层代码
   副作用无法完全隔离——检查面限定为"声明读取"，不执行 apply。
-2. **目标 DSH 版本**：本机 0.1.5-rc.2（启动全有或全无）与 master（required-entry 策略、
-  `--dump-config-schema`、位置参数 `dsh <name>`）语义不同。scavenger 用
-  `engines.dsh` 声明目标线，按安装版行为实现，master 差异用特性探测适配。
+2. **目标 DSH 版本**：本机 0.2.0-rc.2（npm latest）。三个语义转折点已全部落入实现：
+   0.1.6+ **required-entry 启动策略**（`auditStartupEntries`：全局必需 id 集合
+   `{agent-loop, webserver, modules, connection, headless-runner, acp, sdk-jsonrpc-server}`
+   + 根 Include 失败才 fatal，其余插件失败仅启动警告）、0.1.6+ **运行时解析**（插件包
+   解析进 dsh 安装 node_modules，profile 不再投影）、0.1.7+ **`dsh.bundle.patch`
+   有序多文件列表**（同层按序 concat、共享 entryMap——`composeEntries` 先 flat 再
+   `applyEntryPatches` 的语义）。severity/解析/组合层均按此实现；官方
+   `--dump-config-schema`（0.1.7+）可作方言校准依据。
 3. **官方可复用点**：master 的 `--dump-config-schema`（schema/partial/absent/unsupported/
   error + complete）、`~/.dsh/logs/startup-*.log`（启动诊断）、`plugin-inventory`
   （PluginFiberPhase 投影）——scavenger 的 CLI `check` 在目标版本支持时可直接调用/
@@ -171,18 +181,23 @@ live-patch 失败、动态加载失败）。两者配合：先 gate，后 watch�
 | A 组合 | `DUPLICATE_PLUGIN_NAME` | warning | 跨层同名 → 后者运行时遮蔽前者 |
 | A 组合 | `ORPHAN_PATCH_ROW` | warning | 目标不存在 → warn+skip |
 | A 组合 | `LAYER_OVERRIDE` | info | 合法但需知情的覆盖（同 id 行替换） |
-| B 解析 | `ROW_PACKAGE_MISSING` | error | `Cannot find package '<pkg>' imported from <profileDir>/` |
+| B 解析 | `ROW_PACKAGE_MISSING` | error\* | `Cannot find package '<pkg>'; 必需条目行才阻断启动，其余仅启动警告 |
 | B 解析 | `ROW_FILE_MISSING` | warning | 相对/绝对路径行指向不存在的文件 |
-| B 解析 | `ROW_INVALID_SPECIFIER` / `ROW_MISSING_NAME` | error | Loader 无法导入 → 启动失败 |
+| B 解析 | `ROW_INVALID_SPECIFIER` / `ROW_MISSING_NAME` | error\* | Loader 无法导入 → 必需条目行才阻断启动 |
 | B 解析 | `CORE_AS_DEPENDENCY` | error | 插件把 `@deepseek-ai/dsh*` 装成普通依赖 → 遮蔽宿主版本 |
 | B 解析 | `MULTI_VERSION_CORE` | error | lockfile 里多个核心版本 → pnpm 提升歧义 |
 | B 解析 | `PEER_RANGE_MISMATCH` | warning | peer 区间与解析到的实际版本不符 |
 | C 契约 | `CONTRACT_IMPORT_FAILED` | warning | `Cannot find package 'X' imported from <module>` |
-| C 契约 | `CONTRACT_PLUGIN_SHAPE` | error | 默认导出不是 Cordis 插件 → 激活即挂 |
-| C 契约 | `CONTRACT_CONFIG_INVALID` | error | 行配置未过声明的 Standard Schema → ValidationError |
+| C 契约 | `CONTRACT_PLUGIN_SHAPE` | error\* | 默认导出不是 Cordis 插件 → 必需条目行才阻断启动 |
+| C 契约 | `CONTRACT_CONFIG_INVALID` | error\* | 行配置未过声明的 Standard Schema → 必需条目行才阻断启动 |
 | C 契约 | `CONTRACT_INJECT_UNVERIFIED` | warning | inject 服务无已知提供者 → PENDING 永久挂起 |
 | C 契约 | `CONTRACT_CONFIG_DYNAMIC` | info | 配置含 `!!js` 表达式（`ctx.service` 等）→ 校验留给运行期 |
 | Gate | `GATE_ENGINES_DSH` / `GATE_BUNDLE_PATCH_MISSING` 等 | error | 安装前即可拒绝的硬不兼容 |
+
+**\*error/warning 分级（0.1.6+ required-entry 语义）**：带 `\*` 的行级/C 契约错误码仅在
+行 id 属于 DSH 全局必需启动集合（`REQUIRED_STARTUP_ENTRY_IDS`）时才是 error（阻断启动、
+进入清理计划）；其余行降为 warning（启动继续，仅产生启动诊断日志）。组合层错误码
+（A 层）与 B3/B4 不依赖行 id，保持 error 不变。
 
 **可清理（会被 `--apply` 禁用的）error 码**：`ROW_PACKAGE_MISSING`、`ROW_FILE_MISSING`、
 `ROW_INVALID_SPECIFIER`、`CONTRACT_PLUGIN_SHAPE`、`CONTRACT_IMPORT_FAILED`、
