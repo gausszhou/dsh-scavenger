@@ -29,7 +29,7 @@ export interface CheckOptions {
   includeTree?: boolean
 }
 
-export const VERSION = '0.1.0'
+export const VERSION = '0.2.0'
 
 /**
  * DSH 全局必需启动条目（dsh-app-boot `auditStartupEntries` 的硬编码集合，

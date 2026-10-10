@@ -1,6 +1,6 @@
 {
   "name": "@gausszhou/dsh-scavenger",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Scavenge a DeepSeek Harness profile: pre-flight static checks (composition, resolution, contract) that identify which plugins cause boot errors, and clean them up (plan → apply, backup/rollback included).",
   "type": "module",
   "main": "./lib/index.js",
