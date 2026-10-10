@@ -32,26 +32,33 @@ pnpm install && npm run build             # tsdown → lib/（esm + d.ts）
 ```
 
 ```bash
-# 主命令：找出导致报错的插件（dry-run，绝不会写盘）
-dsh-scavenger --profile web
+# 检查（只读）/ 发现 profile
+dsh-scavenger check --profile web [--json]
+dsh-scavenger list
 
-# 清理：把导致报错的插件行禁用到 profile 的 cordis.patch.yml（自动备份）
-dsh-scavenger --profile web --apply
+# 清理：plan（dry-run 只出计划，绝不写盘）→ apply（写盘，自动备份）
+dsh-scavenger plan --profile web                    # 出计划
+dsh-scavenger plan --profile web --out plan.json    # 导出计划，供 apply --plan 复用
+dsh-scavenger apply --profile web                   # 重新检查 → 写盘 → 复检
+dsh-scavenger apply --profile web --plan plan.json  # 直接执行上次导出的计划
 
-# 回滚/查看备份 / 纯检查 / 安装前门禁
+# 主命令是 plan/apply 的快捷方式（无子命令时的默认入口）
+dsh-scavenger --profile web             # 等价 plan（dry-run）
+dsh-scavenger --profile web --apply     # 等价 apply
+
+# 回滚/查看备份 / 安装前门禁（--host-profile 为 --profile 的旧名）
 dsh-scavenger rollback [backupId] --profile web
 dsh-scavenger backups --profile web
-dsh-scavenger check --profile web [--json]
-dsh-scavenger gate ./my-plugin-bundle [--host-profile web] [--json]
+dsh-scavenger gate ./my-plugin-bundle [--profile web] [--json]
 
 # 清理所有三方插件（区别于主命令：不看是否报错，凡非官方裸包插件行一律禁用）
 dsh-scavenger purge --profile web              # dry-run 计划
 dsh-scavenger purge --profile web --apply      # 写盘（自动备份，可 rollback）
 ```
 
-**退出码**：主命令与 check 均为 `0` = 干净（或已清理干净）；`1` = 存在会阻断启动的
-插件（plan 已展示，`--apply` 才会动手）。`--apply` 后仍有 `1` = 残余错误不可通过禁用行
-清除。`2` = 用法/IO 故障。
+**退出码**（check / plan / apply / 主命令 / purge / gate）：`0` = 干净（或已清理干净）；
+`1` = 存在会阻断启动的插件，或计划待执行（plan 只展示，apply 才写盘）；apply 后仍有
+`1` = 残余错误不可通过禁用行清除；`2` = 用法/IO 故障。
 
 **常见组合**：
 

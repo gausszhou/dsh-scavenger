@@ -33,10 +33,11 @@ doctor 管"环境/文件/进程层"，scavenger 管"插件契约与运行时行�
 ├── lib/inspector  契约级检视（node:vm 沙箱安全导入插件模块）
 │     └── 导出形态 / inject 声明 / Config schema / engines / peer 族
 ├── lib/runtime    Cordis 插件（运行期被动观测 + 归因 + 服务/工具面）
-├── bin/dsh-scavenger  CLI：--profile 清理（plan/--apply/rollback）
-│                       check <profile> [--json|--text]
-│                       purge [--apply]            # 清理所有三方插件
-│                       gate  <pkg-or-uri>            # 安装前门禁（供脚本/market/doctor 调用）
+├── bin/dsh-scavenger  CLI：check / plan(--out) / apply(--plan, --no-verify) / rollback / backups
+│                       purge [--apply]            # 批量禁用所有三方插件
+│                       gate  <pkg-or-uri>         # 安装前门禁（--host-profile 旧名别名）
+│                       list                       # 发现 ~/.dsh/profiles 下的 profile
+│                       主命令（无子命令）= plan 快捷方式；--apply 等价 apply
 └── client/        （可选）web 面板：插件健康度/错误时间线
 ```
 
@@ -147,6 +148,16 @@ live-patch 失败、动态加载失败）。两者配合：先 gate，后 watch�
 8. **CLI 路由**：主命令与子命令是两个独立 Command 实例——commander 会把父级同名选项
    吞进子命令（`check --profile x` 会读到父级默认值），独立实例保证
    `--profile/--home/--json` 在任何位置语义一致。
+9. **命令面**（v0.1.0 落地为四组 + 工具）：检查 `check`（只读）与主命令（= `plan` 快捷
+   方式，带 `--apply` 等价 `apply`）；清理 `plan`（dry-run，`--out` 导出计划 JSON）→
+   `apply`（默认重新检查→写盘→复检；`--plan <file>` 复用导出的计划并校验写目标不逃逸
+   profile 目录；`--no-verify` 跳过复检）→ `rollback` / `backups`；批量 `purge`；安装前
+   `gate <candidate>`（`--host-profile` 为 `--profile` 的旧名别名）；工具 `list`（发现
+   profile）。职责分离：`plan` 只读并产出可审阅/可持久化的计划，`apply` 才写盘——脚本
+   与人工审阅环节可解耦。
+10. **统一 JSON 信封**：所有命令的 `--json` 输出同一形状
+    `{command, ok, summary, report, plan, apply, result}`（缺省字段省略），机器调用方
+    只解析一个信封；退出码统一 `0` 干净 / `1` 有阻断插件或计划待执行 / `2` 用法/IO 故障。
 
 ## 5. 里程碑
 

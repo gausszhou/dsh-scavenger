@@ -107,19 +107,32 @@ export async function gateCandidate(candidate: string, options: GateOptions = {}
   }
 
   // --- bundle patch ---
+  // 0.1.7+：`dsh.bundle.patch` 可是单文件路径或有序多文件列表（按序拼接检视）。
   const bundlePatch = manifest.dsh?.bundle?.patch
-  if (typeof bundlePatch === 'string') {
-    const patchPath = join(candidateDir, bundlePatch)
-    if (!existsSync(patchPath)) {
-      pushFindings(findings, 'GATE_BUNDLE_PATCH_MISSING', 'error', `${pkgName} declares dsh.bundle.patch ${bundlePatch} but the file is missing`)
-    } else {
+  const patchFiles = typeof bundlePatch === 'string'
+    ? [bundlePatch]
+    : Array.isArray(bundlePatch) ? bundlePatch.filter((f): f is string => typeof f === 'string' && f !== '') : []
+  if (patchFiles.length > 0) {
+    const allPatches: unknown[] = []
+    let broken = false
+    for (const file of patchFiles) {
+      const patchPath = join(candidateDir, file)
+      if (!existsSync(patchPath)) {
+        pushFindings(findings, 'GATE_BUNDLE_PATCH_MISSING', 'error', `${pkgName} declares dsh.bundle.patch ${file} but the file is missing`)
+        broken = true
+        continue
+      }
       const { parsePatchFile } = await import('./checker/compose.ts')
       const patches = parsePatchFile(patchPath)
       if (patches === null) {
-        pushFindings(findings, 'GATE_BUNDLE_PATCH_UNPARSABLE', 'error', `${pkgName} bundle patch ${bundlePatch} is not a valid entry list`)
-      } else if (options.inspect !== false) {
-        await inspectBundleRows(pkgName, patches, candidateDir, findings, hostDir, depSeverity)
+        pushFindings(findings, 'GATE_BUNDLE_PATCH_UNPARSABLE', 'error', `${pkgName} bundle patch ${file} is not a valid entry list`)
+        broken = true
+        continue
       }
+      allPatches.push(...patches)
+    }
+    if (!broken && options.inspect !== false) {
+      await inspectBundleRows(pkgName, allPatches, candidateDir, findings, hostDir, depSeverity)
     }
   } else {
     pushFindings(findings, 'GATE_NOT_A_BUNDLE', 'info', `${pkgName} declares no dsh.bundle.patch — it will be a plain dependency unless your profile patch inserts one of its rows`)
@@ -145,7 +158,7 @@ export async function gateCandidate(candidate: string, options: GateOptions = {}
   }
 
   // --- inspect a single-entry plugin (non-bundle) ---
-  if (typeof bundlePatch !== 'string' && options.inspect !== false) {
+  if (patchFiles.length === 0 && options.inspect !== false) {
     const entry = manifest.main ?? (typeof manifest.exports === 'string' ? manifest.exports : undefined)
     if (typeof entry === 'string') {
       const resolvedPath = resolveFileSpecifier(entry, candidateDir)
