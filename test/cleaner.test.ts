@@ -17,6 +17,8 @@ const originalPatch = `- insert:
       name: './plugins/config-bad.js'
     - id: gdn-nonexistent
       name: 'gdn-package-does-not-exist-xyz'
+    - id: webserver
+      name: 'gdn-required-does-not-exist'
 `
 
 before(() => {
@@ -35,15 +37,15 @@ before(() => {
 after(() => rmSync(home, { recursive: true, force: true }))
 
 describe('planCleanup', () => {
-  it('plans to disable exactly the error rows that will boot-fail', async () => {
+  it('plans to disable exactly the required-entry error rows', async () => {
     const report = analyzeProfile(profileDir, { homeDir: home, includeTree: true })
     await contractFindings(profileDir, report, { concurrency: 2, timeoutMs: 8000 })
     const plan = planCleanup(report)
     assert.equal(plan.needsCleanup, true)
-    // ROW_PACKAGE_MISSING (error) is cleanable; CONTRACT_IMPORT_FAILED
-    // (warning) and CONTRACT_INJECT_UNVERIFIED (warning) are not errors, so
-    // only the missing-package row is planned.
-    assert.deepEqual(plan.steps.map((s) => s.id), ['gdn-nonexistent'])
+    // ROW_PACKAGE_MISSING 对必需条目（webserver）是 error 才可清理；普通行
+    // （gdn-nonexistent）与 CONTRACT_IMPORT_FAILED / CONTRACT_INJECT_UNVERIFIED
+    // 均降为 warning，不进入清理计划。
+    assert.deepEqual(plan.steps.map((s) => s.id), ['webserver'])
     assert.ok(plan.steps[0]?.codes.includes('ROW_PACKAGE_MISSING'))
     assert.equal(plan.writeTarget, patchPath)
   })
@@ -68,7 +70,7 @@ describe('applyCleanup + review + rollback', () => {
 
     // 3. the appended patch is valid + row disabled
     const afterApply = readFileSync(patchPath, 'utf8')
-    assert.match(afterApply, /- id: "gdn-nonexistent"\n  disabled: true/)
+    assert.match(afterApply, /- id: "webserver"\n  disabled: true/)
     const { parsePatchText } = await import('../src/checker/compose.ts')
     assert.notEqual(parsePatchText(afterApply), null)
 
@@ -80,7 +82,7 @@ describe('applyCleanup + review + rollback', () => {
     // 5. backup bookkeeping
     const backups = listBackups(profileDir)
     assert.equal(backups.length, 1)
-    assert.deepEqual(backups[0]?.disabled.map((d) => d.id), ['gdn-nonexistent'])
+    assert.deepEqual(backups[0]?.disabled.map((d) => d.id), ['webserver'])
 
     // 6. rollback restores the exact original file
     const rolledBack = rollbackCleanup(profileDir)

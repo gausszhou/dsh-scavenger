@@ -9,7 +9,7 @@
  * semver/peer matching primitives they share.
  */
 
-export { analyzeProfile, checkProfile, corePackageNames, VERSION } from './checker/index.ts'
+export { analyzeProfile, checkProfile, corePackageNames, REQUIRED_STARTUP_ENTRY_IDS, VERSION } from './checker/index.ts'
 export type { CheckOptions } from './checker/index.ts'
 export { satisfiesRange, compareSemver } from './checker/peers.ts'
 export { composeLayers, parsePatchFile, parsePatchText, isJsExpr } from './checker/compose.ts'
@@ -25,7 +25,8 @@ export type { InspectedPlugin, ConfigValidation } from './inspector/index.ts'
 export { gateCandidate } from './gate.ts'
 export type { GateReport, GateOptions } from './gate.ts'
 export {
-  planCleanup, applyCleanup, rollbackCleanup, listBackups, disablePatchText, CLEANABLE_CODES,
+  planCleanup, planPurgeCleanup, applyCleanup, rollbackCleanup, listBackups, disablePatchText, CLEANABLE_CODES,
+  isThirdPartyRow, PURGE_CODE,
 } from './cleaner.ts'
 export type { CleanupPlan, CleanupStep, ApplyResult, BackupEntry } from './cleaner.ts'
-export type { CheckReport, Finding, Severity, LoaderRow, LoaderEntryNode, BundleInfo, ReportSummary } from './types.ts'
+export type { CheckReport, Finding, Severity, LoaderRow, LoaderEntryNode, BundleInfo, ReportSummary, ResolvableRow } from './types.ts'

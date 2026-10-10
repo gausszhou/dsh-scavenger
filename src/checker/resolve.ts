@@ -1,11 +1,11 @@
 /**
  * Package / module resolution helpers and the bundle layer stack.
  *
- * Resolution mirrors how the DSH boot sees packages: Node's own node_modules
- * ancestry from the profile directory (which covers pnpm workspace-root
- * hoisting under `$DSH_HOME/profiles/node_modules` and the dsh-managed
- * module fallback), with the dsh installation given first refusal for in-box
- * bundles. All functions are pure filesystem reads — no processes, no network.
+ * Resolution mirrors how the DSH boot sees packages: the profile directory's
+ * own node_modules ancestry (pnpm workspace-root hoisting under
+ * `$DSH_HOME/profiles/node_modules`) plus — since DSH 0.1.6's runtime
+ * resolution — the dsh installation's node_modules as the host fallback.
+ * All functions are pure filesystem reads — no processes, no network.
  */
 
 import { createRequire, isBuiltin } from 'node:module'
@@ -179,11 +179,11 @@ export function resolveBundleDir(
 }
 
 export interface ResolvedBundle extends BundleInfo {
-  /** Absolute path of the layer's patch file. */
+  /** Absolute path of the layer's first patch file. */
   patchPath: string | null
   /** Parsed patch list; empty when none/error. */
   patches: unknown[]
-  /** When the patch file exists but cannot be parsed. */
+  /** When a patch file exists but cannot be parsed. */
   parseError?: string | null
 }
 
@@ -228,16 +228,24 @@ export function buildBundleLayers(
       return base
     }
     const declared = manifest.dsh?.bundle?.patch
-    if (typeof declared !== 'string') {
-      base.error = 'bundle declares no dsh.bundle.patch — the profile will fail to boot'
+    // 0.1.7+：`dsh.bundle.patch` 可声明单文件路径或有序多文件列表（同一
+    // bundle 层内按序拼接、共享 entryMap——与 DSH composeEntries 的 flat 语义一致）。
+    const patchFiles = typeof declared === 'string' ? [declared] : declared
+    if (!Array.isArray(patchFiles) || patchFiles.length === 0 || !patchFiles.every((f): f is string => typeof f === 'string' && f !== '')) {
+      base.error = 'bundle declares no dsh.bundle.patch file path — the profile will fail to boot'
       return base
     }
-    const patchPath = join(directory, declared)
-    if (!existsSync(patchPath)) {
-      base.error = `declared patch ${declared} is missing — the profile will fail to boot`
-      return base
+    const patchPaths: string[] = []
+    for (const file of patchFiles) {
+      const patchPath = join(directory, file)
+      if (!existsSync(patchPath)) {
+        base.error = `declared patch ${file} is missing — the profile will fail to boot`
+        return base
+      }
+      patchPaths.push(patchPath)
     }
-    base.patchPath = patchPath
+    base.patchPath = patchPaths[0] ?? null
+    base.patchPaths = patchPaths
     return base
   })
 
@@ -245,12 +253,17 @@ export function buildBundleLayers(
     if (bundle.error !== null || bundle.patchPath === null) {
       return { label: bundle.name, kind: 'bundle', patches: [], parseError: bundle.error }
     }
-    const patches = parsePatchFile(bundle.patchPath)
-    if (patches === null) {
-      bundle.error = 'patch file is not a valid entry list'
-      bundle.parseError = bundle.error
-      bundle.entries = []
-      return { label: bundle.name, kind: 'bundle', patches: [], parseError: bundle.error, path: bundle.patchPath }
+    // 多文件按声明顺序拼接成一层（DSH composeEntries 先 flat 再 applyEntryPatches）。
+    const patches: unknown[] = []
+    for (const path of bundle.patchPaths ?? [bundle.patchPath]) {
+      const parsed = parsePatchFile(path)
+      if (parsed === null) {
+        bundle.error = `patch file ${path} is not a valid entry list`
+        bundle.parseError = bundle.error
+        bundle.entries = []
+        return { label: bundle.name, kind: 'bundle', patches: [], parseError: bundle.error, path }
+      }
+      patches.push(...parsed)
     }
     bundle.entries = collectInsertIds(patches)
     return { label: bundle.name, kind: 'bundle', patches, parseError: null, path: bundle.patchPath }
@@ -311,13 +324,21 @@ export function resolveFileSpecifier(specifier: string, baseDir: string): string
   return existsSync(filePath) ? filePath : null
 }
 
-export function resolveRowName(name: string, profileDir: string): RowResolution {
+export function resolveRowName(name: string, profileDir: string, dshInstallDir: string | null = null): RowResolution {
   if (name.startsWith('cordis:')) return { kind: 'cordis' }
   if (isBuiltin(name)) return { kind: 'builtin' }
   const pkg = packageRoot(name)
   if (pkg !== null) {
-    const dir = findInstalledPackage(profileDir, pkg) ?? findInstalledPackage(dirname(profileDir), pkg)
-    if (dir !== null) return { kind: 'package', resolved: dir, packageName: pkg }
+    // 0.1.6+ 的运行时解析把插件包装进 dsh 安装目录的 node_modules（profile 侧
+    // 不再投影）；profile 侧（含 workspace 根）优先，dsh 安装作宿主兜底。
+    const anchors: string[] = [profileDir]
+    const workspaceRoot = dirname(profileDir)
+    if (workspaceRoot !== profileDir) anchors.push(workspaceRoot)
+    if (dshInstallDir !== null) anchors.push(dshInstallDir)
+    for (const anchor of anchors) {
+      const dir = findInstalledPackage(anchor, pkg)
+      if (dir !== null) return { kind: 'package', resolved: dir, packageName: pkg }
+    }
     return { kind: 'package', packageName: pkg }
   }
   if (isBareLoaderSpecifier(name)) {

@@ -22,7 +22,8 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parsePatchText } from './checker/compose.ts'
-import type { CheckReport } from './types.ts'
+import { isBareLoaderSpecifier, packageRoot } from './checker/resolve.ts'
+import type { CheckReport, ResolvableRow } from './types.ts'
 
 /** Error codes whose culprit row is safe to disable via a patch. */
 export const CLEANABLE_CODES = new Set([
@@ -71,6 +72,22 @@ function stateRoot(profileDir: string): string {
 
 const patchFileFor = (report: CheckReport): string => join(report.profileDir, 'cordis.patch.yml')
 
+/** 从待禁用步骤构造 CleanupPlan（排序 + 写目标元数据）。 */
+function buildPlan(report: CheckReport, steps: CleanupStep[]): CleanupPlan {
+  const target = patchFileFor(report)
+  const sorted = [...steps].sort((a, b) => a.id.localeCompare(b.id))
+  return {
+    tool: 'dsh-scavenger',
+    profile: report.profile,
+    profileDir: report.profileDir,
+    inspectedAt: new Date().toISOString(),
+    steps: sorted,
+    needsCleanup: sorted.length > 0,
+    writeTarget: target,
+    targetMissing: !existsSync(target),
+  }
+}
+
 /**
  * Build the cleanup plan from a check report: every enabled row that carries
  * error-severity findings from a cleanable code becomes one disable step.
@@ -100,18 +117,44 @@ export function planCleanup(report: CheckReport): CleanupPlan {
     }
   }
 
-  const target = patchFileFor(report)
-  const sorted = [...steps.values()].sort((a, b) => a.id.localeCompare(b.id))
-  return {
-    tool: 'dsh-scavenger',
-    profile: report.profile,
-    profileDir: report.profileDir,
-    inspectedAt: new Date().toISOString(),
-    steps: sorted,
-    needsCleanup: sorted.length > 0,
-    writeTarget: target,
-    targetMissing: !existsSync(target),
+  return buildPlan(report, [...steps.values()])
+}
+
+/** 合成错误码：purge 计划为"清理所有三方插件"专用，不属于 CLEANABLE_CODES 的发现码。 */
+export const PURGE_CODE = 'PURGE_THIRD_PARTY'
+
+/**
+ * 判定一行是否为"三方插件"行：裸包 specifier 且其包根不在 DSH core 集合。
+ * 相对/绝对路径、`cordis:` 内建、`file:`/协议 specifier 与 group 行都不算。
+ */
+export function isThirdPartyRow(row: ResolvableRow, core: Set<string>): boolean {
+  if (row.group === true) return false
+  const name = row.name
+  if (name === undefined || name === '') return false
+  if (!isBareLoaderSpecifier(name)) return false
+  const pkg = packageRoot(name)
+  if (pkg === null) return false
+  return !core.has(pkg)
+}
+
+/**
+ * Build the purge plan: disable EVERY third-party plugin row the loader would
+ * import (`resolvableRows`), regardless of whether the row is broken. Local
+ * file rows, `cordis:` builtins, group rows and DSH core packages are kept.
+ */
+export function planPurgeCleanup(report: CheckReport, core: Set<string>): CleanupPlan {
+  const steps: CleanupStep[] = []
+  for (const row of report.resolvableRows) {
+    if (!isThirdPartyRow(row, core)) continue
+    steps.push({
+      id: row.id,
+      layer: row.layer,
+      name: row.name,
+      codes: [PURGE_CODE],
+      reasons: [`third-party plugin ${String(row.name)} (layer ${row.layer}) — purge disables every third-party plugin`],
+    })
   }
+  return buildPlan(report, steps)
 }
 
 /** Serialize the disable patches (DSH dialect, ids JSON-escaped). */

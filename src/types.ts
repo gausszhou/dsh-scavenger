@@ -32,6 +32,19 @@ export interface LoaderRow {
   group?: boolean
 }
 
+/**
+ * One loader row the boot Loader would actually attempt to import:
+ * rows disabled literally (own or inherited from a group parent) are dropped;
+ * `!!js` disabled expressions stay `conditional` (indeterminate offline).
+ */
+export interface ResolvableRow {
+  id: string
+  layer: string
+  name?: string
+  group?: boolean
+  activation: 'required' | 'conditional'
+}
+
 /** One bundle layer of the profile stack. */
 export interface BundleInfo {
   name: string
@@ -40,8 +53,10 @@ export interface BundleInfo {
   source?: string
   /** Resolved package directory; null when not installed. */
   directory: string | null
-  /** Absolute patch file path; null when undeclared or missing. */
+  /** Absolute patch file path (first declared file); null when undeclared or missing. */
   patchPath: string | null
+  /** All declared patch files in order (0.1.7+ allows ordered patch lists). */
+  patchPaths?: string[]
   /** Why this layer cannot load at boot (null = ok). */
   error: string | null
   /** Loader entry ids this bundle's patch inserts (top level). */
@@ -70,6 +85,8 @@ export interface CheckReport {
   findings: Finding[]
   /** Composed loader rows (top-level + group children), most consumers can ignore. */
   rows: LoaderRow[]
+  /** Rows the boot Loader would actually import (disabled rows dropped; `!!js` disabled stays conditional). */
+  resolvableRows: ResolvableRow[]
   bundles: BundleInfo[]
   /** Final composed tree with layer tags; only present when `includeTree` was set. */
   nodes?: LoaderEntryNode[]
